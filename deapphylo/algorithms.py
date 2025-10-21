@@ -83,7 +83,7 @@ def varAnd(population, toolbox, cxpb, mutpb):
 
 
 def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
-             halloffame=None, verbose=__debug__):
+             halloffame=None, verbose=__debug__, observer=None):
     """This algorithm reproduce the simplest evolutionary algorithm as
     presented in chapter 7 of [Back2000]_.
 
@@ -98,6 +98,8 @@ def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
     :param halloffame: A :class:`~deap.tools.HallOfFame` object that will
                        contain the best individuals, optional.
     :param verbose: Whether or not to log the statistics.
+    :param observer: An optional observer object with a track_population method
+                     that will be called each generation, optional.
     :returns: The final population
     :returns: A class:`~deap.tools.Logbook` with the statistics of the
               evolution
@@ -153,6 +155,11 @@ def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
 
     if halloffame is not None:
         halloffame.update(population)
+    
+    # Track population with observer if provided
+    if observer is not None:
+        fitness_values = [ind.fitness.values[0] for ind in population]
+        observer.track_population(population, 0, fitness_values)
 
     record = stats.compile(population) if stats else {}
     logbook.record(gen=0, nevals=len(invalid_ind), **record)
@@ -179,6 +186,11 @@ def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
 
         # Replace the current population by the offspring
         population[:] = offspring
+        
+        # Track population with observer if provided
+        if observer is not None:
+            fitness_values = [ind.fitness.values[0] for ind in population]
+            observer.track_population(population, gen, fitness_values)
 
         # Append the current generation statistics to the logbook
         record = stats.compile(population) if stats else {}

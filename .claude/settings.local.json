@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.timeseriesclassification.com)",
+      "WebFetch(domain:timeseriesai.github.io)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

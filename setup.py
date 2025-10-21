@@ -9,7 +9,7 @@ from distutils.errors import CCompilerError, DistutilsExecError, \
 from os import path
 import codecs
 
-import deap
+import deapphylo
 
 warnings = list()
 
@@ -19,7 +19,7 @@ try:
 except ImportError:
     warnings.append("warning: using distutils.core.setup, cannot use \"develop\" option")
     from distutils.core import setup, Extension
-    modules = ['deap', 'deap.benchmarks', 'deap.tests', 'deap.tools', 'deap.tools._hypervolume']
+    modules = ['deapphylo', 'deapphylo.benchmarks', 'deapphylo.tests', 'deapphylo.tools', 'deapphylo.tools._hypervolume']
 
 this_directory = path.abspath(path.dirname(__file__))
 long_description = codecs.open(path.join(this_directory, 'README.md'), 'r', 'utf-8').read()
@@ -61,20 +61,20 @@ def run_setup(build_ext):
     if build_ext:
         extra_modules = list()
 
-        hv_module = Extension("deap.tools._hypervolume.hv", sources=["deap/tools/_hypervolume/_hv.c", "deap/tools/_hypervolume/hv.cpp"])
+        hv_module = Extension("deapphylo.tools._hypervolume.hv", sources=["deapphylo/tools/_hypervolume/_hv.c", "deapphylo/tools/_hypervolume/hv.cpp"])
         extra_modules.append(hv_module)
 
-    setup(name='deap',
-          version=deap.__revision__,
-          description='Distributed Evolutionary Algorithms in Python',
-          long_description=long_description,
+    setup(name='deap-phylo',
+          version=deapphylo.__revision__,
+          description='DEAP-Phylo: Distributed Evolutionary Algorithms with Phylogenetic Tracking',
+          long_description=long_description + "\n\n## DEAP-Phylo Features\n\nDEAP-Phylo extends DEAP with integrated observer support for tracking category evolution throughout the evolutionary process. Perfect for analyzing which genetic operators, functions, or traits become prominent over generations.",
           long_description_content_type="text/markdown",
-          author='deap Development Team',
+          author='DEAP-Phylo Development Team',
           author_email='deap-users@googlegroups.com',
-          url='https://www.github.com/deap',
+          url='https://github.com/Kundur-IREQ-Quantum-Collaboration/deap_phylo',
           packages=find_packages(exclude=['examples', 'tests']),
           platforms=['any'],
-          keywords=['evolutionary algorithms', 'genetic algorithms', 'genetic programming', 'cma-es', 'ga', 'gp', 'es', 'pso'],
+          keywords=['evolutionary algorithms', 'genetic algorithms', 'genetic programming', 'phylogenetic tracking', 'category evolution', 'cma-es', 'ga', 'gp', 'es', 'pso'],
           license='LGPL',
           classifiers=[
               'Development Status :: 4 - Beta',
