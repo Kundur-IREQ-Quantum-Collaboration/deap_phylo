@@ -71,11 +71,7 @@ def run_setup(build_ext):
           long_description_content_type="text/markdown",
           author='DEAP-Phylo Development Team',
           author_email='deap-users@googlegroups.com',
-<<<<<<< HEAD
           url='https://github.com/Kundur-IREQ-Quantum-Collaboration/deap_phylo',
-=======
-          url='https://www.github.com/deap-phylo/deap-phylo',
->>>>>>> 44a541a (Create DEAP-Phylo: evolutionary algorithms with phylogenetic tracking)
           packages=find_packages(exclude=['examples', 'tests']),
           platforms=['any'],
           keywords=['evolutionary algorithms', 'genetic algorithms', 'genetic programming', 'phylogenetic tracking', 'category evolution', 'cma-es', 'ga', 'gp', 'es', 'pso'],
