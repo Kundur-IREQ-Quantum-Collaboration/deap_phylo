@@ -1,33 +1,43 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Dict, List, Optional
-from collections import defaultdict
-from deap import gp
 
-class EvolutionaryCategoryObserver:
-    def __init__(self, primitive_categories: Dict[str, str]):
+from deap import gp
+from typing import Dict, List, Optional
+from util.symbolic_metric import *
+from util.classical_activations import *
+from util.neuronal_inputs import *
+
+class EvolutionaryCategoryGradientObserver:
+    def __init__(self, primitive_categories: Dict[str, str], data: torch.Tensor):
         self.primitive_categories = primitive_categories
         self.unique_categories = list(set(primitive_categories.values()))
+        self.nn_map = {}
+        self.nn_inputs = data
+        self.activation_classes = tuple(get_activation_type_map().values()) 
+
         self.generation_history = []
         self.individual_history = []
         
     def analyze_individual(self, individual) -> Dict[str, float]:
-        category_counts = defaultdict(int)
-        tracked_nodes = 0
+        primitive_gradients = {}
+        expr = deap_tree_to_sympy(individual, get_sympy_map())
+
+        for primitive, category in self.primitive_cateogries.items():
+            if category != 'operation':
+                dF = functional_derivative(expr, primitive_to_sp(primitive))
+                simplified_dF = sp.simplify(dF)
+                callable_dF = sympy_expr_to_torch_callable(simplified_dF, get_activation_func_map())
+                inputs = get_neuron_inputs(self.nn_map[gp.stringify(individual)], self.nn_inputs, activation_classes=self.activation_classes)
+
+                x_tensor = torch.cat([inp.flatten() for inp in inputs.values()]).unsqueeze(1)
+                primitive_gradients[primitive] = compute_empirical_measure_torch(x_tensor, callable_dF)
         
-        # Track nodes that are NOT operations (i.e., actual kernels/functions we care about)
-        for node in individual:
-            primitive_name = getattr(node, 'name', str(node))
-            
-            if primitive_name in self.primitive_categories:
-                category = self.primitive_categories[primitive_name]
-                # Only track if it's not an operation
-                if category != 'operation':
-                    category_counts[category] += 1
-                    tracked_nodes += 1
-        
-        return {cat: category_counts[cat] / max(tracked_nodes, 1) for cat in self.unique_categories}
+        normalization_factor = 1.0 / sum(primitive_gradients.itervalues())
+        for k in primitive_gradients.keys():
+            primitive_gradients[k] = primitive_gradients[k] * normalization_factor
+
+        return primitive_gradients
     
     def track_population(self, population: List, generation: int, fitnesses: Optional[List[float]] = None):
         gen_data = []
@@ -37,9 +47,12 @@ class EvolutionaryCategoryObserver:
             gen_data.append(percentages)
             self.individual_history.append(percentages)
         
+        # TODO: CHANGE THIS SINCE PRIMITIV_GRADIENTS IS BY INDIVIDUAL ACT AND NOT BY CATEGORY
         stats = {f'{cat}_mean': np.mean([p[cat] for p in gen_data]) for cat in self.unique_categories}
         stats['generation'] = generation
         self.generation_history.append(stats)
+
+        self.nn_map.clear()
         
     def get_evolution_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self.generation_history)
@@ -52,8 +65,6 @@ class EvolutionaryCategoryObserver:
         """Get comprehensive summary of category evolution"""
         if not self.generation_history:
             return {}
-        
-        df = pd.DataFrame(self.individual_history)
         
         # Initial and final distributions
         initial_dist = {cat: self.generation_history[0][f'{cat}_mean'] for cat in self.unique_categories}
