@@ -604,6 +604,73 @@ def genRamped(pset, min_, max_, type_=None):
     return genHalfAndHalf(pset, min_, max_, type_)
 
 
+def genFull_safe(pset, min_, max_, term_types, type_=None):
+    """Generate an expression where each leaf has the same depth
+    between *min* and *max*.
+
+    :param pset: Primitive set from which primitives are selected.
+    :param min_: Minimum height of the produced trees.
+    :param max_: Maximum Height of the produced trees.
+    :param type_: The type that should return the tree when called, when
+                  :obj:`None` (default) the type of :pset: (pset.ret)
+                  is assumed.
+    :returns: A full tree with all leaves at the same depth.
+    """
+
+    def condition(height, depth):
+        """Expression generation stops when the depth is equal to height."""
+        return depth == height
+
+    return generate_safe(pset, min_, max_, condition, term_types, type_)
+
+
+def genGrow_safe(pset, min_, max_, term_types, type_=None):
+    """Generate an expression where each leaf might have a different depth
+    between *min* and *max*.
+
+    :param pset: Primitive set from which primitives are selected.
+    :param min_: Minimum height of the produced trees.
+    :param max_: Maximum Height of the produced trees.
+    :param type_: The type that should return the tree when called, when
+                  :obj:`None` (default) the type of :pset: (pset.ret)
+                  is assumed.
+    :returns: A grown tree with leaves at possibly different depths.
+    """
+
+    def condition(height, depth):
+        """Expression generation stops when the depth is equal to height
+        or when it is randomly determined that a node should be a terminal.
+        """
+        return depth == height or \
+            (depth >= min_ and random.random() < pset.terminalRatio)
+
+    return generate_safe(pset, min_, max_, condition, term_types, type_)
+
+def genHalfAndHalf_safe(pset, min_, max_, term_types, type_=None):
+    """Generate an expression with a PrimitiveSet *pset*.
+    Half the time, the expression is generated with :func:`~deap.gp.genGrow`,
+    the other half, the expression is generated with :func:`~deap.gp.genFull`.
+
+    :param pset: Primitive set from which primitives are selected.
+    :param min_: Minimum height of the produced trees.
+    :param max_: Maximum Height of the produced trees.
+    :param type_: The type that should return the tree when called, when
+                  :obj:`None` (default) the type of :pset: (pset.ret)
+                  is assumed.
+    :returns: Either, a full or a grown tree.
+    """
+    method = random.choice((genGrow_safe, genFull_safe))
+    return method(pset, min_, max_, term_types, type_)
+
+def genRamped_safe(pset, min_, max_, term_types, type_=None):
+    """
+    .. deprecated:: 1.0
+        The function has been renamed. Use :func:`~deap.gp.genHalfAndHalf` instead.
+    """
+    warnings.warn("gp.genRamped has been renamed. Use genHalfAndHalf instead.",
+                  FutureWarning)
+    return genHalfAndHalf_safe(pset, min_, max_, term_types, type_)
+
 def generate(pset, min_, max_, condition, type_=None):
     """Generate a tree as a list of primitives and terminals in a depth-first
     order. The tree is built from the root to the leaves, and it stops growing
@@ -629,6 +696,7 @@ def generate(pset, min_, max_, condition, type_=None):
     expr = []
     height = random.randint(min_, max_)
     stack = [(0, type_)]
+
     while len(stack) != 0:
         depth, type_ = stack.pop()
         if condition(height, depth):
@@ -655,6 +723,41 @@ def generate(pset, min_, max_, condition, type_=None):
                 stack.append((depth + 1, arg))
     return expr
 
+# RETRIEVED FROM: https://github.com/DEAP/deap/issues/237
+def generate_safe(pset, min_, max_, condition, terminal_types, type_=None):
+    if type_ is None:
+        type_ = pset.ret
+    expr = []
+    height = random.randint(min_, max_)
+    stack = [(0, type_)]
+    while len(stack) != 0:
+        depth, type_ = stack.pop()
+
+        if type_ in terminal_types or condition(height, depth):
+            try:
+                term = random.choice(pset.terminals[type_])
+            except IndexError:
+                _, _, traceback = sys.exc_info()
+                raise IndexError("The gp.generate function tried to add "
+                                 "a terminal of type '%s', but there is "
+                                 "none available." % (type_,)).with_traceback(traceback)
+            if isclass(term):
+                term = term()
+            expr.append(term)
+            print(expr)
+        else:
+            try:
+                prim = random.choice(pset.primitives[type_])
+            except IndexError:
+                _, _, traceback = sys.exc_info()
+                raise IndexError("The gp.generate function tried to add "
+                                 "a primitive of type '%s', but there is "
+                                 "none available." % (type_,)).with_traceback(traceback)
+            expr.append(prim)
+            print(expr)
+            for arg in reversed(prim.args):
+                stack.append((depth + 1, arg))
+    return expr
 
 ######################################
 # GP Crossovers                      #

@@ -149,6 +149,8 @@ def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
 
     # Evaluate the individuals with an invalid fitness
     invalid_ind = [ind for ind in population if not ind.fitness.valid]
+    for ind in invalid_ind:
+        print('INIT EVAL: ', str(ind))
     fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
     for ind, fit in zip(invalid_ind, fitnesses):
         ind.fitness.values = fit
@@ -158,6 +160,8 @@ def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
     
     # Track population with observer if provided
     if observer is not None:
+        for pop in population:
+            print(str(pop))
         fitness_values = [ind.fitness.values[0] for ind in population]
         observer.track_population(population, 0, fitness_values)
 
@@ -258,7 +262,7 @@ def varOr(population, toolbox, lambda_, cxpb, mutpb):
 
 
 def eaMuPlusLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
-                   stats=None, halloffame=None, verbose=__debug__):
+                   stats=None, halloffame=None, verbose=__debug__, observer=None):
     r"""This is the :math:`(\mu + \lambda)` evolutionary algorithm.
 
     :param population: A list of individuals.
@@ -317,6 +321,13 @@ def eaMuPlusLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
     if halloffame is not None:
         halloffame.update(population)
 
+    # Track population with observer if provided
+    if observer is not None:
+        for pop in population:
+            print(str(pop))
+        fitness_values = [ind.fitness.values[0] for ind in population]
+        observer.track_population(population, 0, fitness_values)
+
     record = stats.compile(population) if stats is not None else {}
     logbook.record(gen=0, nevals=len(invalid_ind), **record)
     if verbose:
@@ -340,6 +351,11 @@ def eaMuPlusLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
         # Select the next generation population
         population[:] = toolbox.select(population + offspring, mu)
 
+        # Track population with observer if provided
+        if observer is not None:
+            fitness_values = [ind.fitness.values[0] for ind in population]
+            observer.track_population(population, gen, fitness_values)
+
         # Update the statistics with the new population
         record = stats.compile(population) if stats is not None else {}
         logbook.record(gen=gen, nevals=len(invalid_ind), **record)
@@ -350,7 +366,7 @@ def eaMuPlusLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
 
 
 def eaMuCommaLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
-                    stats=None, halloffame=None, verbose=__debug__):
+                    stats=None, halloffame=None, verbose=__debug__, observer=None):
     r"""This is the :math:`(\mu~,~\lambda)` evolutionary algorithm.
 
     :param population: A list of individuals.
@@ -415,6 +431,13 @@ def eaMuCommaLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
     if halloffame is not None:
         halloffame.update(population)
 
+    # Track population with observer if provided
+    if observer is not None:
+        for pop in population:
+            print(str(pop))
+        fitness_values = [ind.fitness.values[0] for ind in population]
+        observer.track_population(population, 0, fitness_values)
+
     logbook = tools.Logbook()
     logbook.header = ['gen', 'nevals'] + (stats.fields if stats else [])
 
@@ -441,6 +464,11 @@ def eaMuCommaLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
         # Select the next generation population
         population[:] = toolbox.select(offspring, mu)
 
+        # Track population with observer if provided
+        if observer is not None:
+            fitness_values = [ind.fitness.values[0] for ind in population]
+            observer.track_population(population, gen, fitness_values)
+
         # Update the statistics with the new population
         record = stats.compile(population) if stats is not None else {}
         logbook.record(gen=gen, nevals=len(invalid_ind), **record)
@@ -450,7 +478,7 @@ def eaMuCommaLambda(population, toolbox, mu, lambda_, cxpb, mutpb, ngen,
 
 
 def eaGenerateUpdate(toolbox, ngen, halloffame=None, stats=None,
-                     verbose=__debug__):
+                     verbose=__debug__, observer=None):
     """This is algorithm implements the ask-tell model proposed in
     [Colette2010]_, where ask is called `generate` and tell is called `update`.
 
@@ -504,8 +532,20 @@ def eaGenerateUpdate(toolbox, ngen, halloffame=None, stats=None,
         if halloffame is not None:
             halloffame.update(population)
 
+        # Track population with observer if provided
+        if observer is not None:
+            for pop in population:
+                print(str(pop))
+            fitness_values = [ind.fitness.values[0] for ind in population]
+            observer.track_population(population, 0, fitness_values)
+
         # Update the strategy with the evaluated individuals
         toolbox.update(population)
+
+        # Track population with observer if provided
+        if observer is not None:
+            fitness_values = [ind.fitness.values[0] for ind in population]
+            observer.track_population(population, gen, fitness_values)
 
         record = stats.compile(population) if stats is not None else {}
         logbook.record(gen=gen, nevals=len(population), **record)
