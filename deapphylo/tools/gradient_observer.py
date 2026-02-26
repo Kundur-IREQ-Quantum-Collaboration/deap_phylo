@@ -135,11 +135,13 @@ class EvolutionaryCategoryGradientObserver:
             self.individual_history.append(percentages)
         
         stats = {
-            f'{cat}_mean': np.mean([
-                np.sum([p.get(k,0) for k in self.terminals.keys() if self.terminals[k].category == cat]) 
-                for p in gen_data
-            ]) 
-            for cat in self.unique_categories 
+            'mean': {
+                cat: np.mean([
+                    np.sum([p.get(k,0) for k in self.terminals.keys() if self.terminals[k].category == cat]) 
+                    for p in gen_data
+                ]) 
+                for cat in self.unique_categories 
+            }
         }
         stats['generation'] = generation
         structural_analysis = self.analyze_structure_generation(population, generation)
@@ -170,8 +172,8 @@ class EvolutionaryCategoryGradientObserver:
         if not self.generation_history:
             return {}
         
-        initial_dist = {cat: self.generation_history[0][f'{cat}_mean'] for cat in self.unique_categories}
-        final_dist = {cat: self.generation_history[-1][f'{cat}_mean'] for cat in self.unique_categories}
+        initial_dist = self.generation_history[0][f'mean'] 
+        final_dist = self.generation_history[-1]['mean']
 
         change = {cat: final_dist[cat] - initial_dist[cat] for cat in self.unique_categories}
         fitness_correlations = {cat: self.get_fitness_correlation(cat) for cat in self.unique_categories}
@@ -473,19 +475,18 @@ class EvolutionaryCategoryGradientObserver:
         return fig
 
     def plot_initial_vs_final(self, figsize=(10, 6), key='operations_structural', title="Operations Structural", init_index=0, final_index=-1):
-
         if not self.generation_history:
             return None
 
         initial = self.generation_history[init_index][key]
         final = self.generation_history[final_index][key]
 
-        ops = sorted(set(initial.keys()) | set(final.keys()))
+        keys = sorted(set(initial.keys()) | set(final.keys()))
 
-        initial_vals = [initial[op] * 100 for op in ops]
-        final_vals = [final[op] * 100 for op in ops]
+        initial_vals = [initial[key] * 100 for key in keys]
+        final_vals = [final[key] * 100 for key in keys]
 
-        x = np.arange(len(ops))
+        x = np.arange(len(keys))
         width = 0.35
 
         fig, ax = plt.subplots(figsize=figsize)
@@ -493,11 +494,35 @@ class EvolutionaryCategoryGradientObserver:
         ax.bar(x + width/2, final_vals, width, label="Final")
 
         ax.set_xticks(x)
-        ax.set_xticklabels(ops, rotation=45, ha='right')
+        ax.set_xticklabels(keys, rotation=45, ha='right')
         ax.set_ylabel("Structural Usage (%)")
         ax.set_title(f"{title} Distribution: Initial vs Final")
         ax.legend()
         ax.grid(True, axis='y', alpha=0.3)
+
+        plt.tight_layout()
+        return fig
+    
+    def plot_initial_vs_final_pie(self, figsize=(10, 6), key='mean', title="Activation Category", init_index=0, final_index=-1):
+        if not self.generation_history:
+            return None
+
+        initial = self.generation_history[init_index][key]
+        final = self.generation_history[final_index][key]
+
+        keys = sorted(set(initial.keys()) | set(final.keys()))
+
+        initial_vals = [initial[key] * 100 for key in keys]
+        final_vals = [final[key] * 100 for key in keys]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+        colors = plt.cm.Set3(np.linspace(0, 1, len(keys)))
+
+        ax1.pie(initial_vals, labels=keys, autopct='%1.0f%%', colors=colors)
+        ax1.set_title(f'{title} Initial Distribution')
+
+        ax2.pie(final_vals, labels=keys, autopct='%1.0f%%', colors=colors)
+        ax1.set_title(f'{title} Final Distribution')
 
         plt.tight_layout()
         return fig
