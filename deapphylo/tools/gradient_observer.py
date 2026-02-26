@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 
 from typing import Dict, List, Optional
 from util.symbolic_metric import *
@@ -194,70 +196,6 @@ class EvolutionaryCategoryGradientObserver:
             'final_structural_term': final_structural_analysis_term,
             'final_structural_op': final_structural_analysis_op,
         }
-    
-    def plot_category_evolution(self, figsize=(10, 6)):
-        df = self.get_evolution_dataframe()
-        if df.empty:
-            return None
-        
-        fig, ax = plt.subplots(figsize=figsize)
-        colors = plt.cm.Set3(np.linspace(0, 1, len(self.unique_categories)))
-        
-        for i, category in enumerate(self.unique_categories):
-            mean_col = f'{category}_mean'
-            if mean_col in df.columns:
-                ax.plot(df['generation'], df[mean_col] * 100, 
-                        label=category, color=colors[i], linewidth=2)
-        
-        ax.set_xlabel('Generation')
-        ax.set_ylabel('Usage Percentage (%)')
-        ax.set_title('Category Evolution Over Generations')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        return fig
-    
-    def plot_category_distribution(self, figsize=(10, 8)):
-        summary = self.get_summary()
-        if not summary:
-            return None
-            
-        final_dist = summary['final_distribution']
-        
-        # Filter out 'operation' category
-        categories = [cat for cat in final_dist.keys() if cat != 'operation']
-        values = [final_dist[cat] * 100 for cat in categories]
-        colors = plt.cm.Set3(np.linspace(0, 1, len(categories)))
-        
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Create pie chart with better spacing for labels
-        wedges, texts, autotexts = ax.pie(
-            values, 
-            labels=categories, 
-            colors=colors, 
-            autopct='%1.1f%%',
-            startangle=90,
-            pctdistance=0.85,
-            labeldistance=1.15  # Push labels further out
-        )
-        
-        for text in texts:
-            text.set_fontsize(10)
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontsize(9)
-            autotext.set_weight('bold')
-        
-        ax.set_title('Final Category Distribution', fontsize=12, pad=20)
-        
-        # Add a legend if there are many categories
-        if len(categories) > 6:
-            ax.legend(wedges, categories, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
-        
-        plt.tight_layout()
-        return fig
     
     def plot_fitness_correlations(self, figsize=(8, 6)):
         summary = self.get_summary()
@@ -474,55 +412,67 @@ class EvolutionaryCategoryGradientObserver:
 
         return fig
 
-    def plot_initial_vs_final(self, figsize=(10, 6), key='operations_structural', title="Operations Structural", init_index=0, final_index=-1):
+    def plot_gen_summary_bars(self, key, figsize=(10, 6), title="REPLACEME", ylabel="REPLACEME", indices=(0, -1), bar_labels=None,):
         if not self.generation_history:
             return None
 
-        initial = self.generation_history[init_index][key]
-        final = self.generation_history[final_index][key]
+        list_of_data = [self.generation_history[i][key] for i in indices]
+        keys = sorted(set().union(*list_of_data))
+        list_of_data_percents = [
+            [data.get(k, 0) * 100 for k in keys]
+            for data in list_of_data
+        ]
+        n_groups = len(list_of_data_percents)
 
-        keys = sorted(set(initial.keys()) | set(final.keys()))
-
-        initial_vals = [initial[key] * 100 for key in keys]
-        final_vals = [final[key] * 100 for key in keys]
+        if bar_labels is None:
+            bar_labels = [f"Gen {i}" for i in indices]
 
         x = np.arange(len(keys))
-        width = 0.35
+        cmap = cm.get_cmap("viridis")
+        norm = mcolors.Normalize(vmin=np.min(indices), vmax=np.max(indices))
+        total_width = 0.8
+        bar_width = total_width / n_groups
 
         fig, ax = plt.subplots(figsize=figsize)
-        ax.bar(x - width/2, initial_vals, width, label="Initial")
-        ax.bar(x + width/2, final_vals, width, label="Final")
+        for i, (vals, index, label) in enumerate(zip(list_of_data_percents, indices, bar_labels)):
+            offset = (i - (n_groups - 1) / 2) * bar_width
+            color = cmap(norm(index))
+            ax.bar(x + offset, vals, bar_width, label=label, color=color)
 
         ax.set_xticks(x)
         ax.set_xticklabels(keys, rotation=45, ha='right')
-        ax.set_ylabel("Structural Usage (%)")
-        ax.set_title(f"{title} Distribution: Initial vs Final")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
         ax.legend()
         ax.grid(True, axis='y', alpha=0.3)
 
         plt.tight_layout()
         return fig
     
-    def plot_initial_vs_final_pie(self, figsize=(10, 6), key='mean', title="Activation Category", init_index=0, final_index=-1):
+    def plot_gen_summary_pies(self, key, figsize=(10, 6), title="REPLACEME", indices=(0, -1), pie_labels=None,):
         if not self.generation_history:
             return None
 
-        initial = self.generation_history[init_index][key]
-        final = self.generation_history[final_index][key]
+        list_of_data = [self.generation_history[i][key] for i in indices]
+        keys = sorted(set().union(*list_of_data))
+        list_of_data_percents = [
+            [data.get(k, 0) * 100 for k in keys]
+            for data in list_of_data
+        ]
+        n_groups = len(list_of_data_percents)
 
-        keys = sorted(set(initial.keys()) | set(final.keys()))
+        if pie_labels is None:
+            pie_labels = [f"Gen {i}" for i in indices]
 
-        initial_vals = [initial[key] * 100 for key in keys]
-        final_vals = [final[key] * 100 for key in keys]
+        fig, axes = plt.subplots(1, n_groups, figsize=(figsize[0]*n_groups/2, figsize[1]))
+        if n_groups == 1:
+            axes = [axes]
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
         colors = plt.cm.Set3(np.linspace(0, 1, len(keys)))
 
-        ax1.pie(initial_vals, labels=keys, autopct='%1.0f%%', colors=colors)
-        ax1.set_title(f'{title} Initial Distribution')
-
-        ax2.pie(final_vals, labels=keys, autopct='%1.0f%%', colors=colors)
-        ax1.set_title(f'{title} Final Distribution')
+        for ax, vals, label in zip(axes, list_of_data_percents, pie_labels):
+            ax.pie(vals, labels=keys, autopct='%1.0f%%', colors=colors)
+            ax.set_title(f"{title} — {label}")
 
         plt.tight_layout()
         return fig
@@ -551,9 +501,75 @@ class EvolutionaryCategoryGradientObserver:
 
         ax.set_xlabel("Generation")
         ax.set_ylabel(ylabel)
-        ax.set_title(f"Selected {title} Evolution")
+        ax.set_title(title)
         ax.legend()
         ax.grid(True, alpha=0.3)
 
+        plt.tight_layout()
+        return fig
+
+    # --- DEPRECATED ---
+
+    def plot_category_evolution(self, figsize=(10, 6)):
+        df = self.get_evolution_dataframe()
+        if df.empty:
+            return None
+        
+        fig, ax = plt.subplots(figsize=figsize)
+        colors = plt.cm.Set3(np.linspace(0, 1, len(self.unique_categories)))
+        
+        for i, category in enumerate(self.unique_categories):
+            mean_col = f'{category}_mean'
+            if mean_col in df.columns:
+                ax.plot(df['generation'], df[mean_col] * 100, 
+                        label=category, color=colors[i], linewidth=2)
+        
+        ax.set_xlabel('Generation')
+        ax.set_ylabel('Usage Percentage (%)')
+        ax.set_title('Category Evolution Over Generations')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+    
+    def plot_category_distribution(self, figsize=(10, 8)):
+        summary = self.get_summary()
+        if not summary:
+            return None
+            
+        final_dist = summary['final_distribution']
+        
+        # Filter out 'operation' category
+        categories = [cat for cat in final_dist.keys() if cat != 'operation']
+        values = [final_dist[cat] * 100 for cat in categories]
+        colors = plt.cm.Set3(np.linspace(0, 1, len(categories)))
+        
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        # Create pie chart with better spacing for labels
+        wedges, texts, autotexts = ax.pie(
+            values, 
+            labels=categories, 
+            colors=colors, 
+            autopct='%1.1f%%',
+            startangle=90,
+            pctdistance=0.85,
+            labeldistance=1.15  # Push labels further out
+        )
+        
+        for text in texts:
+            text.set_fontsize(10)
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontsize(9)
+            autotext.set_weight('bold')
+        
+        ax.set_title('Final Category Distribution', fontsize=12, pad=20)
+        
+        # Add a legend if there are many categories
+        if len(categories) > 6:
+            ax.legend(wedges, categories, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+        
         plt.tight_layout()
         return fig
