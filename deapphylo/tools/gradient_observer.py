@@ -1,13 +1,11 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
+import logging
 
 from typing import Dict, List, Optional
 from util.symbolic_metric import *
 from util.neuronal_inputs import *
-from util.activations_base import Activation, ActivationRegistry, get_torch_act_types
+from util.activations_base import Activation, ActivationRegistry
 from util.register_activations import *
 
 from autofd import Grid
@@ -31,25 +29,30 @@ class EvolutionaryCategoryGradientObserver:
         self.activation_classes = (Activation,)
         self.nan_count = 0
 
+        self.logger = logging.getLogger(__name__)
+
     def analyze_individual(self, individual) -> Dict[str, float]:
-        print("INDIVIDUAL", str(individual))
+        self.logger.info(f"INDIVIDUAL {str(individual)}")
         primitive_gradients = {}
         inputs, _, acts, exprs = get_activation_inputs_and_exprs_from_model(self.nn_map[str(individual)], self.nn_inputs, activation_classes=(self.activation_classes))
+
         for act_name, _ in acts.items():
             expr = exprs[act_name]
             for primitive in self.terminals.keys():
                 primitive_measure = compute_gateaux_measure(expr, self.func_map, sp.Function(primitive), inputs[act_name])
+
                 if primitive_measure is None or primitive_measure != primitive_measure:
-                    print(f"Activation {act_name} is not well-defined on input domain.")
+                    self.logger.info(f"Activation {act_name} is not well-defined on input domain.")
                     return None
                 primitive_gradients[primitive] = primitive_gradients.get(primitive, 0) + primitive_measure
         
         gradients_sum = sum(primitive_gradients.values())
         normalization_factor = 1.0 / gradients_sum if gradients_sum != 0 else 0.0
+
         for k in primitive_gradients.keys():
             primitive_gradients[k] = primitive_gradients[k] * normalization_factor
-        print("Normalized gradients:", primitive_gradients)
-        print("")
+
+        self.logger.info(f"Normalized gradients: {primitive_gradients}")
         return primitive_gradients
     
     def analyze_individual_autofd(self, individual) -> Dict[str, float]:
@@ -63,7 +66,7 @@ class EvolutionaryCategoryGradientObserver:
             input = inputs[act_name]
             xs, nan_frac = self.process_inputs(input)
             if nan_frac > 0:
-                print(f"Warning: {nan_frac*100:.2f}% of inputs for {act_name} are NaN")
+                self.logger.info(f"Warning: {nan_frac*100:.2f}% of inputs for {act_name} are NaN")
                 return None
             weights = jnp.ones_like(xs) / xs.size
 
@@ -155,7 +158,7 @@ class EvolutionaryCategoryGradientObserver:
     
     def get_fitness_correlation(self, category: str) -> float:
         df = pd.DataFrame(self.individual_history)
-        # Compute mean per family
+
         cols = self.family_map[category]
         valid_cols = [c for c in cols if c in df.columns]
         if valid_cols:
@@ -164,11 +167,10 @@ class EvolutionaryCategoryGradientObserver:
         return df[category].corr(df['fitness']) if 'fitness' in df.columns else 0.0
     
     def get_summary(self) -> Dict[str, any]:
-        """Get comprehensive summary of category evolution"""
         if not self.generation_history:
             return {}
         
-        initial_dist = self.generation_history[0][f'mean'] 
+        initial_dist = self.generation_history[0]['mean'] 
         final_dist = self.generation_history[-1]['mean']
 
         change = {cat: final_dist[cat] - initial_dist[cat] for cat in self.unique_categories}
@@ -238,13 +240,11 @@ class EvolutionaryCategoryGradientObserver:
         for individual in population:
             counts = self.count_individual_nodes(individual, key_dict)
 
-            # primitive presence
             for k, v in counts.items():
                 if v > 0:
                     indiv_presence[k] += 1
                 total_counts[k] += v
 
-            # category presence (union within individual)
             if category_map:
                 seen_cats = set()
                 for k, v in counts.items():
