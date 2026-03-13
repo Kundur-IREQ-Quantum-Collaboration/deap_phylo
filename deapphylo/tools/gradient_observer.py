@@ -35,19 +35,21 @@ class EvolutionaryCategoryGradientObserver:
         self.logger.info(f"INDIVIDUAL {str(individual)}")
         primitive_gradients = {}
         inputs, _, acts, exprs = get_activation_inputs_and_exprs_from_model(self.nn_map[str(individual)], self.nn_inputs, activation_classes=(self.activation_classes))
-
         for act_name, _ in acts.items():
             expr = exprs[act_name]
             for primitive in self.terminals.keys():
                 primitive_measure = compute_gateaux_measure(expr, self.func_map, sp.Function(primitive), inputs[act_name])
-
                 if primitive_measure is None or primitive_measure != primitive_measure:
                     self.logger.info(f"Activation {act_name} is not well-defined on input domain.")
                     return None
                 primitive_gradients[primitive] = primitive_gradients.get(primitive, 0) + primitive_measure
         
         gradients_sum = sum(primitive_gradients.values())
-        normalization_factor = 1.0 / gradients_sum if gradients_sum != 0 else 0.0
+        if gradients_sum == 0:
+            self.logger.info(f"Warning: all gradients zero for individual {individual}")
+            normalization_factor = 1.0  # leave raw measures as-is (all zeros)
+        else:
+            normalization_factor = 1.0 / gradients_sum
 
         for k in primitive_gradients.keys():
             primitive_gradients[k] = primitive_gradients[k] * normalization_factor
