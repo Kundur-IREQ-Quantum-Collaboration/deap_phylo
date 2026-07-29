@@ -2,13 +2,19 @@ import numpy as np
 import pandas as pd
 import logging
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from util.symbolic_metric import *
 from util.neuronal_inputs import *
-from util.activations_base import Activation, ActivationRegistry
+from util.activations_base import Activation
 from util.register_activations import *
 
 from autofd import Grid
+
+@dataclass
+class CountAnalysis:
+    presence_ratio: dict
+    structural_ratio: dict
+    category_presence_ratio: dict | None = None
 
 class EvolutionaryCategoryGradientObserver:
     def __init__(self, registry: ActivationRegistry, data: torch.Tensor):
@@ -31,98 +37,96 @@ class EvolutionaryCategoryGradientObserver:
 
         self.logger = logging.getLogger(__name__)
 
-    def analyze_individual(self, individual) -> Dict[str, float]:
-        self.logger.info(f"INDIVIDUAL {str(individual)}")
-        primitive_gradients = {}
-        inputs, _, acts, exprs = get_activation_inputs_and_exprs_from_model(self.nn_map[str(individual)], self.nn_inputs, activation_classes=(self.activation_classes))
-        for act_name, _ in acts.items():
-            expr = exprs[act_name]
-            for primitive in self.terminals.keys():
-                primitive_measure = compute_gateaux_measure(expr, self.func_map, sp.Function(primitive), inputs[act_name])
-                if primitive_measure is None or primitive_measure != primitive_measure:
-                    self.logger.info(f"Activation {act_name} is not well-defined on input domain.")
-                    return None
-                primitive_gradients[primitive] = primitive_gradients.get(primitive, 0) + primitive_measure
-        
-        gradients_sum = sum(primitive_gradients.values())
-        if gradients_sum == 0:
-            self.logger.info(f"Warning: all gradients zero for individual {individual}")
-            normalization_factor = 1.0  # leave raw measures as-is (all zeros)
-        else:
-            normalization_factor = 1.0 / gradients_sum
+    def _analyze_individual(self, individual, measure_fn) -> Optional[Dict[str, float]]:
+        """
+        Shared skeleton for all three analysis strategies. measure_fn(act_name, act, expr, input_)
+        must return a dict {primitive_name: measure} for ONE activation site, or None to signal
+        the activation is not well-defined (e.g. NaN) -- which aborts the whole individual.
+        """
+        primitive_gradients = {k: 0.0 for k in self.terminals.keys()}
 
-        for k in primitive_gradients.keys():
-            primitive_gradients[k] = primitive_gradients[k] * normalization_factor
+        inputs, _, acts, exprs = get_activation_inputs_and_exprs_from_model(
+            self.nn_map[str(individual)], self.nn_inputs, activation_classes=self.activation_classes
+        )
 
-        self.logger.info(f"Normalized gradients: {primitive_gradients}")
-        return primitive_gradients
-    
-    def analyze_individual_autofd(self, individual) -> Dict[str, float]:
-
-        primitive_gradients = {}
-        for primitive in self.terminals.keys():
-            primitive_gradients[primitive] = 0.0
-
-        inputs, _, acts, _ = get_activation_inputs_and_exprs_from_model(self.nn_map[str(individual)], self.nn_inputs, activation_classes=(self.activation_classes))
         for act_name, act in acts.items():
-            input = inputs[act_name]
-            xs, nan_frac = self.process_inputs(input)
-            if nan_frac > 0:
-                self.logger.info(f"Warning: {nan_frac*100:.2f}% of inputs for {act_name} are NaN")
+            expr = exprs.get(act_name)
+            input_ = inputs[act_name]
+
+            contributions = measure_fn(act_name=act_name, act=act, expr=expr, input_=input_)
+            if contributions is None:
+                self.logger.info(f"Activation {act_name} is not well-defined on input domain.")
                 return None
-            weights = jnp.ones_like(xs) / xs.size
 
-            fs, fns, ids = act.get_jax_fn()
-            for fn in fns:
-                fn.grid = Grid(nodes=(xs,), weights=(weights,))
-            def F(*args):
-                if len(args) != len(fns):
-                    raise TypeError(f"Expected exactly {len(fns)} positional arguments, got {len(args)}")
-                return o.integrate(fs(*args))
-        
-            dF_s = jax.grad(F, argnums=range(len(ids)))(*fns)         
-            gradients = [jnp.sqrt(jnp.sum(jnp.square(jax.vmap(df)(xs)))).item() for df in dF_s]
+            for primitive, measure in contributions.items():
+                primitive_gradients[primitive] += measure
 
-            for i, id in enumerate(ids):
-                primitive_gradients[id] += gradients[i]
-        
-        gradients_sum = sum(primitive_gradients.values())
-        normalization_factor = 1.0 / gradients_sum if gradients_sum != 0 else 0.0
-        for k in primitive_gradients.keys():
-            primitive_gradients[k] = primitive_gradients[k] * normalization_factor
+        return self._normalize(primitive_gradients)
 
-        return primitive_gradients
+    def _normalize(self, gradients: Dict[str, float]) -> Dict[str, float]:
+        total = sum(gradients.values())
+        if total == 0:
+            self.logger.info("Warning: all gradients zero for individual")
+            factor = 1.0   # leave raw (zero) measures as-is
+        else:
+            factor = 1.0 / total
+        return {k: v * factor for k, v in gradients.items()}
     
-    def analyze_individual_sympy(self, individual) -> Dict[str, float]:
-
-        primitive_gradients = {}
+    def _gateaux_measure(self, act_name, act, expr, input_):
+        contributions = {}
         for primitive in self.terminals.keys():
-            primitive_gradients[primitive] = 0.0
+            m = compute_gateaux_measure(expr, self.func_map, sp.Function(primitive), input_)
+            if m is None or m != m:  # NaN check
+                return None
+            contributions[primitive] = m
+        return contributions
 
-        inputs, _, acts, exprs = get_activation_inputs_and_exprs_from_model(self.nn_map[str(individual)], self.nn_inputs, activation_classes=(self.activation_classes))
-        for act_name, _ in acts.items():
-            input = inputs[act_name]
-            expr = exprs[act_name]
+    def _sympy_measure(self, act_name, act, expr, input_):
+        contributions = {}
+        for primitive in self.terminals.keys():
+            dF = functional_derivative(sp.simplify(expr), primitive_to_sp(primitive))
+            simplified_dF = sp.simplify(dF)
+            callable_dF = sympy_expr_to_torch_callable(simplified_dF, self.func_map)
+            m = compute_empirical_measure_torch(input_, callable_dF)
+            if m != m:  # NaN check
+                return None
+            contributions[primitive] = m
+        return contributions
 
-            for primitive in self.terminals.keys():
-                dF = functional_derivative(sp.simplify(expr), primitive_to_sp(primitive))
-                simplified_dF = sp.simplify(dF)
-                callable_dF = sympy_expr_to_torch_callable(simplified_dF, self.func_map)
-                primitive_measure = compute_empirical_measure_torch(input, callable_dF)
+    def _autofd_measure(self, act_name, act, expr, input_):
+        xs, nan_frac = self.process_inputs(input_)
+        if nan_frac > 0:
+            self.logger.info(f"Warning: {nan_frac*100:.2f}% of inputs for {act_name} are NaN")
+            return None
+        weights = jnp.ones_like(xs) / xs.size
 
-                if primitive_measure != primitive_measure:  # Check for NaN
-                    return None
-                primitive_gradients[primitive] = primitive_gradients.get(primitive, 0) + primitive_measure
-        
-        gradients_sum = sum(primitive_gradients.values())
-        normalization_factor = 1.0 / gradients_sum if gradients_sum != 0 else 0.0
-        for k in primitive_gradients.keys():
-            primitive_gradients[k] = primitive_gradients[k] * normalization_factor
+        fs, fns, ids = act.get_jax_fn()
+        for fn in fns:
+            fn.grid = Grid(nodes=(xs,), weights=(weights,))
 
-        return primitive_gradients
+        def F(*args):
+            if len(args) != len(fns):
+                raise TypeError(f"Expected exactly {len(fns)} positional arguments, got {len(args)}")
+            return o.integrate(fs(*args))
+
+        dF_s = jax.grad(F, argnums=range(len(ids)))(*fns)
+        gradients = [jnp.sqrt(jnp.sum(jnp.square(jax.vmap(df)(xs)))).item() for df in dF_s]
+
+        return dict(zip(ids, gradients))
+    
+    def analyze_individual(self, individual) -> Optional[Dict[str, float]]:
+        self.logger.info(f"INDIVIDUAL {str(individual)}")
+        return self._analyze_individual(individual, self._gateaux_measure)
+
+    def analyze_individual_autofd(self, individual) -> Optional[Dict[str, float]]:
+        return self._analyze_individual(individual, self._autofd_measure)
+
+    def analyze_individual_sympy(self, individual) -> Optional[Dict[str, float]]:
+        return self._analyze_individual(individual, self._sympy_measure)
     
     def track_population(self, population: List, generation: int, fitnesses: Optional[List[float]] = None):
         gen_data = []
+        self.logger.info(f'POPULATION SIZE: {len(population)}')
         for i, individual in enumerate(population):
             percentages = self.analyze_individual(individual)
             if percentages is None:
@@ -168,7 +172,7 @@ class EvolutionaryCategoryGradientObserver:
 
         return df[category].corr(df['fitness']) if 'fitness' in df.columns else 0.0
     
-    def get_summary(self) -> Dict[str, any]:
+    def get_summary(self) -> Dict[str, Any]:
         if not self.generation_history:
             return {}
         
@@ -222,13 +226,11 @@ class EvolutionaryCategoryGradientObserver:
     
     def count_individual_nodes(self, individual, key_dict):
         counts = {k: 0 for k in key_dict.keys()}
-
         for node in individual:
             name = getattr(node, "name", None)
             if name in counts:
                 counts[name] += 1
             # total_nodes += 1
-
         return counts
 
     def analyze_counts(self, population, key_dict, category_map=None):
@@ -262,7 +264,6 @@ class EvolutionaryCategoryGradientObserver:
             k: indiv_presence[k] / n_individuals if n_individuals else 0
             for k in indiv_presence
         }
-
         structural_ratio = {
             k: total_counts[k] / total_nodes_all if total_nodes_all else 0
             for k in total_counts
@@ -273,43 +274,37 @@ class EvolutionaryCategoryGradientObserver:
                 cat: cat_presence[cat] / n_individuals if n_individuals else 0
                 for cat in cat_presence
             }
-            return presence_ratio, structural_ratio, category_presence_ratio
-        
-        return presence_ratio, structural_ratio
+            return CountAnalysis(presence_ratio=presence_ratio, structural_ratio=structural_ratio, category_presence_ratio=category_presence_ratio)
+        return CountAnalysis(presence_ratio=presence_ratio, structural_ratio=structural_ratio)
 
     def aggregate_terminal_categories(self, ratio_dict):
         category_totals = {cat: 0.0 for cat in self.unique_categories}
-
         for term_name, value in ratio_dict.items():
             cat = self.terminals[term_name].category
             category_totals[cat] += value
-
         return category_totals
 
     def analyze_structure_generation(self, population, generation):
 
         term_cat_map = self.registry.terminal_category_lookup()
-
-        term_presence, term_struct, term_cat_presence = self.analyze_counts(
+        term_count_analysis = self.analyze_counts(
             population, self.terminals, term_cat_map
         )
-
-        op_presence, op_struct = self.analyze_counts(
+        op_count_anaysis = self.analyze_counts(
             population, self.operations
         )
-
-        term_cat_struct = self.aggregate_terminal_categories(term_struct)
+        term_cat_struct = self.aggregate_terminal_categories(term_count_analysis.structural_ratio)
 
         return {
             "generation": generation,
             "terminals": {
-                "presence_ratio": term_presence,
-                "structural_ratio": term_struct,
-                "category_presence": term_cat_presence,
+                "presence_ratio": term_count_analysis.presence_ratio,
+                "structural_ratio": term_count_analysis.structural_ratio,
+                "category_presence": term_count_analysis.category_presence_ratio,
                 "category_structural": term_cat_struct,
             },
             "operations": {
-                "presence_ratio": op_presence,
-                "structural_ratio": op_struct,
+                "presence_ratio": op_count_anaysis.presence_ratio,
+                "structural_ratio": op_count_anaysis.structural_ratio,
             }
         }
